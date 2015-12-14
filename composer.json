@@ -1,0 +1,6 @@
+{
+  "name": "softcatala/sc-normalize-upload-dir",
+  "type": "wordpress-plugin",
+  "description": "Functions to filter and normalize upload dir.",
+  "license": "GPLv3"
+}
