@@ -3,7 +3,7 @@
 Plugin Name: SC Normalize Upload Dir
 Plugin URI: https://github.com/Softcatala/sc-normalize-upload-dir
 Description: Functions to filter and normalize upload dir. Based on functions from https://github.com/thephpleague/flysystem/blob/master/src/Util.php#L80
-Version: 0.1
+Version: 0.2
 Author: Xavi Ivars
 Author URI: http://xavi.ivars.me
 This program is free software; you can redistribute it and/or
@@ -19,35 +19,73 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
-add_filter('upload_dir', 'sc_upload_dir');
-function sc_upload_dir( $params ) {
-    return array_map('sc_normalize_path', $params);	
-}
+$sc_upload_dir_normalizer = new SC_Upload_Dir_Normalizer();
 
-function sc_normalize_path($path)
-{
-    // Remove any kind of funky unicode whitespace
-    $normalized = preg_replace('#\p{C}+|^\./#u', '', $path);
-    $normalized = sc_normalize_relative_path($normalized);
-    if (preg_match('#/\.{2}|^\.{2}/|^\.{2}$#', $normalized)) {
-        throw new LogicException(
-            'Path is outside of the defined root, path: [' . $path . '], resolved: [' . $normalized . ']'
-        );
-    }
-    $normalized = preg_replace('#\\\{2,}#', '\\', trim($normalized, '\\'));
-    $normalized = preg_replace('#/{2,}#', '/', trim($normalized, '/'));
-    return $normalized;
-}
-	
-function sc_normalize_relative_path($path)
-{
-    // Path remove self referring paths ("/./").
-    $path = preg_replace('#/\.(?=/)|^\./|/\./?$#', '', $path);
-    // Regex for resolving relative paths
-    $regex = '#/*[^/\.]+/\.\.#Uu';
-    while (preg_match($regex, $path)) {
-        $path = preg_replace($regex, '', $path);
-    }
-    return $path;
-}
+add_filter( 'upload_dir', array ( $sc_upload_dir_normalizer, 'sc_upload_dir' ) );
 
+class SC_Upload_Dir_Normalizer {
+
+	var $sc_cached_normalized_paths;
+
+	public function __construct() {
+		$this->sc_cached_normalized_paths = array();
+	}
+
+	public function sc_upload_dir( $params ) {
+		$paths = array_filter( $params, 'is_string' );
+
+		$normalized_paths = array_map( array( $this, 'sc_normalize_path' ) , $paths );
+
+		return array_merge( $params, $normalized_paths );
+	}
+
+	private function sc_normalize_path( $path ) {
+
+		if ( ! array_key_exists( $path , $this->sc_cached_normalized_paths ) ) {
+			// Remove any kind of funky unicode whitespace
+			$normalized = preg_replace( '#\p{C}+|^\./#u', '', $path );
+
+			$normalized = $this->sc_normalize_relative_path( $normalized );
+
+			if ( preg_match( '#/\.{2}|^\.{2}/|^\.{2}$#', $normalized ) ) {
+				error_log( "Path outside of the root: " . $normalized );
+			}
+
+			$this->sc_cached_normalized_paths[$path] = $this->sc_remove_double_slashes( $normalized );
+		}
+
+		return $this->sc_cached_normalized_paths[$path];
+	}
+
+	private function sc_remove_double_slashes( $path ) {
+		$wrapper = null;
+
+		// Strip the protocol.
+		if ( wp_is_stream( $path ) ) {
+			list( $wrapper, $path ) = explode( '://', $path, 2 );
+		}
+
+		// From php.net/mkdir user contributed notes.
+		$path	 = preg_replace( '#\\\{2,}#', '\\', trim( $path, '\\' ) );
+		$path	 = preg_replace( '#/{2,}#', '/', $path );
+
+		// Put the wrapper back on the target.
+		if ( $wrapper !== null ) {
+			$path = $wrapper . '://' . $path;
+		}
+
+		return $path;
+	}
+
+	private function sc_normalize_relative_path( $path ) {
+		// Path remove self referring paths ("/./").
+		$path = preg_replace( '#/\.(?=/)|^\./|/\./?$#', '', $path );
+
+		// Regex for resolving relative paths
+		$regex	 = '#/*[^/\.]+/\.\.#Uu';
+		while ( preg_match( $regex, $path ) ) {
+			$path = preg_replace( $regex, '', $path );
+		}
+		return $path;
+	}
+}
